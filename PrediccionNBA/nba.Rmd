@@ -1,0 +1,313 @@
+---
+title: "NBA"
+author: "Hugo Cesar Octavio del Sueldo"
+date: "10/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r data, include = FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(gvlma)
+library(MASS)
+library(car)
+
+nba <- read_csv("nba.csv")
+```
+## Prediccion en el Data Set NBA
+El data set `nba` muestra informacion sobre los salarios y los rendimientos de los jugadores de la NBA
+
+### Exploratory data analysis of the data set
+
+- Player: Nombre del jugador.
+
+- Salary: Salario en dolares.
+
+- NBA_Country: NAcionalidad del jugador.
+
+- NBA_DraftNumber: Posición del draft.
+
+- Age: Edad del jugador.
+
+- Tm: Abreviatura del nombre.
+
+- G: Partidos jugados
+
+- MP: Minutos jugados.
+
+- PER: Índice de eficiencia del jugador. El promedio de la liga es 15.
+
+- TS = Porcentaje de tiro real. Tiene en cuenta los tiros de 2 puntos, los triples y los tiros libres.
+                                        
+- TMP: Minutos jugados por el equipo.
+                                        
+- 3PAr: Porcentaje de triples.
+                                        
+- FTr: Porcentaje de tiros libres.
+                                        
+- ORB%Offensive Rebound Percentage (ORB%): Porcentaje de rebotes ofensivos.
+
+- DRB%: Porcentaje de rebote defensivo.
+
+- TRB%: Porcentaje de rebote total.
+
+- AST%: Porcentaje de asistencia.
+
+- STL%: Porcentaje de robo.
+
+- BLK%: Porcentaje de tapones.
+
+- TOV%: Porcentaje de robo de balón antes de que el equipo contrario tire.
+
+- USG%: Porcentaje de jugadas que estuvo involucrado un jugador, siempre que la jugada termine en uno de los tres resultados reales: intento de gol de campo, intento de tiro libre o pérdida.
+
+- OWS: Acciones de victoria ofensivas.
+
+- DWS: Acciones de victorias defensivas.
+
+- WS: Un número estimado de victorias a las que un jugador ha contribuido.
+
+- WS/48: WS por 48 minutos.
+
+- BPM: Calcula el más/menos de un jugador respecto al rendimiento del equipo por cada 100 posesiones ofensivas.
+
+- DBPM: Calcula el más/menos de un jugador respecto al rendimiento del equipo por cada 100 posesiones defensivas.
+
+- BPM: Calcula el más/menos de un jugador respecto al rendimiento del equipo por cada 100 posesiones.
+
+- VORP: Valor sobre jugador de reemplazo.
+```{r }
+head(nba) #primeras 10 observaciones
+tail(nba) #ultimas 10 observaciones
+names(nba)
+class(nba) #clase de nba
+typeof(nba) #tipo de dato interno usado por el objeto
+str(nba)
+length(nba) #cantidad de columnas
+dim(nba) #cantidad de filas y columnas
+summary(nba) #summary de los principales estadisticos
+```
+### Limpieza de valores duplicados o nulos
+
+```{r}
+distinct(nba)
+distinct(nba, Player)
+duplicated(nba)
+nrow(nba[duplicated(nba$Player), ]) #cuentame los repetidos
+nba <- nba[!duplicated(nba$Player), ] #borro los duplicados y lo guardo con el mismo nombre de mi data set
+distinct(nba) #compruebo los resultados
+
+summarise_all(nba, funs(sum(is.na(.)))) #cuentame los valores nulos en el dataset
+```
+#### Cambio los nombres de algunas columnas
+
+Algunas columnas tienen nombres con los simbolos del %, comienzan con numeros o / que nos afectan a la hora de hacer calculos. Por lo tanto, vamos a modificarlas para poder trabajar correctamente.
+
+```{r}
+nba <- rename_with(nba, ~ tolower(gsub('%', '', .x, fixed = T)))
+nba <- rename_with(nba, ~ tolower(gsub('3', 'three', .x, fixed = T)))
+nba <- rename_with(nba, ~ tolower(gsub('/', '_', .x, fixed = T)))
+```
+
+
+### Regresion lineal de las variables para explicar el salario de los jugadores
+```{r}
+regres01 = lm(salary~nba_draftnumber + age + g + mp + per + ts + threepar + ftr + orb + drb + trb  + ast + stl + blk + tov + usg + ows + dws + ws + ws_48 + obpm + dbpm + bpm + vorp,data = nba)
+gvmodel <- gvlma(regres01) 
+summary(gvmodel)
+
+#Aqui vemos que las variables explicativas mas significativa son draftnumber, age, g y mp
+
+```
+#### Vamos a probar si merece la pena sumar las variables country y team al modelo 
+
+Para esto utilizaremos la funcion anova para comparar dos modelos donde el primero contiene al segundo.
+
+```{r}
+mod <- lm(salary ~ nba_country + tm + age + g + mp, data = nba)
+mod1 <- lm(salary ~ nba_country + tm, data = nba)
+
+anova(mod1, mod)
+
+# vemos que las variables cualitativas country y team no son significativas para estimar el salario de los jugadores ya que al ser el valor de p muy pequeno podemos decir que se puede descartar el modelo que contenga country y tm 
+```
+
+### Ahora analizaremos los supuestos que no se cumplen para el modelo de regresion multilineal simple
+
+#### Vamos a analizar la normalidad con QQ-plots
+
+Un QQ-plots (quantile vs quantile plots) es una representación gráfica, que sirve para comparar dos distribuciones y ver si coinciden. En realidad, para comprobar si un conjunto de datos muestrales están generados por una distribución teórica como la normal 
+```{r}
+
+qqPlot(regres01, labels = row.names(nba), id.method = "identify",
+       simulate = TRUE, main = "Q-Q Plot")
+```
+#### Vemos el histograma con su funcion de densidad 
+
+```{r}
+residplot <- function(fit, nbreaks=20) {
+  z <- rstudent(fit)
+  hist(z, breaks=nbreaks, freq=FALSE,
+       xlab="Studentized Residual",
+       main="Distribution of Errors")
+  rug(jitter(z), col="brown")
+  curve(dnorm(x, mean=mean(z), sd=sd(z)),
+        add=TRUE, col="blue", lwd=2)
+  lines(density(z)$x, density(z)$y,
+        col="red", lwd=2, lty=2)
+  legend("topright",
+         legend = c( "Normal Curve", "Kernel Density Curve"),
+         lty=1:2, col=c("blue","red"), cex=.7)
+}
+
+residplot(regres01)
+```
+
+
+#### Linealidad
+
+Se grafican los valores ajustados con respecto a los predictores, si no hay problemas de linealidad se obtiene un recta sobre las que se representan los puntos.
+
+```{r}
+crPlots(regres01)
+```
+
+
+
+#### Multicolinealidad
+
+Es la existencia de alta correlación entre los predictores puede producir problemas de imprecisión de los estimadores (las varianzas de los estimadores son mayores de lo que deberían ser). Así, los intervalos de confianza son muy anchos, hay dificultad para interpretar los coeficientes y se tiende a no rechazar las hipótesis nula de significación.
+
+##### Método del Factor de Inflación de la Varianza
+
+```{r}
+vif(regres01)
+sqrt(vif(regres01)) > 2
+
+# tenemos problemas de multicolinealidad en ts, trb, usg, obpm, threepar, ows, dbpm, g, dws, bpm, mp, orb, blk, ws, vorp, per, drb y ws_48
+```
+
+
+#### Outliers
+
+##### Observaciones anómalas
+1 - Atípicos: Una observación es atípica si el residuo asociado es grande.
+2 - Extrema o Apalancada: Una observación es extrema (o potencialmente influyente o apalancada) si se encuentra apreciablemente alejada del resto de observaciones de la muestra.
+3 - Influyente: Una observación es influyente si la presencia de dicha observación en la muestra altera significativamente algún aspecto de la estimación del modelo.
+
+###### Valores Atípicos
+- Identificamos los valores atípicos mediante un Bonferroni p-values. En este caso solo contrasta el mayor de los residuos, si se rechaza que sea atípico se concluye que no hay atípicos.
+- También se puede realizar un gráfico de los residuos estandarizados con ±2σ.
+
+```{r}
+outlierTest(regres01)
+```
+###### Valores extremos
+- Para determinar valores extremos, se calcula el `hat statistic`, siendo la media *p/n* donde p es el número de parámetros estimados y n el tamaño muestral. Las observaciones con un valor (2 o 3 veces la media) hat alto se consideran extremas.
+
+```{r}
+hat.plot <- function(fit) {
+  p <- length(coefficients(fit))
+  n <- length(fitted(fit))
+  plot(hatvalues(fit), main="Index Plot of Hat Values")
+  abline(h=c(2,3)*p/n, col="red", lty=2)
+  identify(1:n, hatvalues(fit), names(hatvalues(fit)))
+}
+hat.plot(regres01)
+```
+###### Valores Influyentes
+Hay dos métodos par identificar observaciones influyentes:
+
+- La distancia de Cook (D-estadístico)
+- Gráficos added variable
+```{r}
+# Cooks Distance D
+# identify D values > 4/(n-k-1) 
+cutoff <- 4/(nrow(nba)-length(regres01$coefficients)-2)
+plot(regres01, which=4, cook.levels=cutoff)
+abline(h=cutoff, lty=2, col="red")
+```
+
+```{r linealidad-plot, warning = FALSE}
+# Added variable plots
+# add id.method="identify" to interactively identify points
+avPlots(regres01, ask = FALSE, id.method = "identify")
+```
+
+```{r influence-plot, warning = FALSE}
+# Influence Plot
+influencePlot(regres01, id.method="identify", main="Influence Plot", 
+              sub="Circle size is proportial to Cook's Distance" )
+```
+
+#### Vamos a hacer una transformacion logaritmica para ajustar el modelo
+
+La transformacion Box-Cox transformara las variables explicativas con un logaritmo neperiano
+
+```{r}
+
+summary(powerTransform(nba$age))  
+#no vale la pena transformar la variable edad para que cumpla la normalidad porque el p valor nos indica que no es necesario
+summary(powerTransform(nba$nba_draftnumber))
+#no vale la pena transformar la variable draftnumber para que cumpla la normalidad porque el p valor nos indica que no es necesario
+summary(powerTransform(nba$g)) 
+#no vale la pena transformar la variable g para que cumpla la normalidad porque el p valor nos indica que no es necesario
+```
+
+#### Métodos de Selección
+##### Selección Best Subset
+##### Selección Stepwise
+- Forward Stepwise
+- Backward Stepwise
+- Mixto
+```{r}
+library(MASS)
+stepAIC(regres01, direction = "both")
+```
+
+#### Relative importance of each variable 
+
+“Which variables are most important in predicting the outcome?” You implicitly want to rank-order the predictors in terms of relative importance. There may be practical grounds for asking the second question. For example, if you could rank-order leadership practices by their relative importance for organizational success, you could help managers focus on the behaviors they most need to develop.
+
+There have been many attempts to develop a means for assessing the relative importance of predictors. The simplest has been to compare standardized regression coefficients. Standardized regression coefficients describe the expected change in the response variable (expressed in standard deviation units) for a standard deviation change in a predictor variable, holding the other predictor variables constant. You can obtain the standardized regression coefficients in R by standardizing each of the variables in your dataset to a mean of 0 and standard deviation of 1 using the scale() function, before submitting the dataset to a regression analysis.
+
+```{r}
+relweights <- function(fit,...){
+R <- cor(fit$model)
+nvar <- ncol(R)
+rxx <- R[2:nvar, 2:nvar]
+rxy <- R[2:nvar, 1]
+svd <- eigen(rxx)
+evec <- svd$vectors
+ev <- svd$values
+delta <- diag(sqrt(ev))
+lambda <- evec %*% delta %*% t(evec)
+lambdasq <- lambda ^ 2
+beta <- solve(lambda) %*% rxy
+rsquare <- colSums(beta ^ 2)
+rawwgt <- lambdasq %*% beta ^ 2
+import <- (rawwgt / rsquare) * 100
+import <- as.data.frame(import)
+row.names(import) <- names(fit$model[2:nvar]) 
+names(import) <- "Weights"
+import <- import[order(import),1, drop=FALSE]
+dotchart(import$Weights, labels=row.names(import),
+  xlab="% of R-Square", pch=19,
+  main="Relative Importance of Predictor Variables", 
+  sub=paste("Total R-Square=", round(rsquare, digits=3)), ...)
+return(import)
+}
+
+fit <- lm(salary ~ nba_draftnumber + age + g + mp + per + 
+    threepar + orb + trb + usg + ws + obpm, data=nba)
+relweights(fit, col="blue")
+```
+
+

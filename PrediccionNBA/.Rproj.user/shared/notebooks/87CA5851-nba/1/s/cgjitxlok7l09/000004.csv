@@ -1,0 +1,8 @@
+"0","library(car)"
+"0","qqPlot(regres01, labels = row.names(nba), id.method = ""identify"","
+"0","       simulate = TRUE, main = ""Q-Q Plot"")"
+"1","[1]"
+"1"," 114"
+"1"," 326"
+"1","
+"

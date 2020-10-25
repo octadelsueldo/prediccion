@@ -1,0 +1,19 @@
+"0","library(readr)"
+"0","library(dplyr)"
+"0","library(ggplot2)"
+"0","library(knitr)"
+"0","library(gvlma)"
+"0","library(MASS)"
+"0","library(car)"
+"0",""
+"0","nba <- read_csv(""nba.csv"")"
+"2","Parsed with column specification:
+cols(
+  .default = col_double(),
+  Player = [31mcol_character()[39m,
+  NBA_Country = [31mcol_character()[39m,
+  Tm = [31mcol_character()[39m
+)
+"
+"2","See spec(...) for full column specifications.
+"

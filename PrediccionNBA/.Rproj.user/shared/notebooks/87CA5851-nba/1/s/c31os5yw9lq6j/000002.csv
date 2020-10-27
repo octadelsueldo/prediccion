@@ -1,3 +1,0 @@
-"0","nba <- rename_with(nba, ~ tolower(gsub('%', '', .x, fixed = T)))"
-"0","nba <- rename_with(nba, ~ tolower(gsub('3', 'three', .x, fixed = T)))"
-"0","nba <- rename_with(nba, ~ tolower(gsub('/', '_', .x, fixed = T)))"

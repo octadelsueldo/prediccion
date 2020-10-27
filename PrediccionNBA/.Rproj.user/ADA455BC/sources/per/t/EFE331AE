@@ -12,13 +12,13 @@
     "properties": {
         "expression": "nba",
         "caption": "nba",
-        "totalObservations": "483",
-        "displayedObservations": "483",
-        "variables": "28",
-        "cacheKey": "D4966045",
+        "totalObservations": "481",
+        "displayedObservations": "481",
+        "variables": "30",
+        "cacheKey": "3D08595E",
         "object": "nba",
         "environment": "",
-        "contentUrl": "grid_resource/gridviewer.html?env=&obj=nba&cache_key=D4966045&max_cols=50",
+        "contentUrl": "grid_resource/gridviewer.html?env=&obj=nba&cache_key=3D08595E&max_cols=50",
         "preview": "0",
         "source_window_id": "",
         "Source": "Source"

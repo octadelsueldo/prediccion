@@ -105,6 +105,7 @@ nba <- nba[!duplicated(nba$Player), ] #borro los duplicados y lo guardo con el m
 distinct(nba) #compruebo los resultados
 
 summarise_all(nba, funs(sum(is.na(.)))) #cuentame los valores nulos en el dataset
+
 ```
 #### Cambio los nombres de algunas columnas
 
@@ -116,10 +117,27 @@ nba <- rename_with(nba, ~ tolower(gsub('3', 'three', .x, fixed = T)))
 nba <- rename_with(nba, ~ tolower(gsub('/', '_', .x, fixed = T)))
 ```
 
+#### Borro los nulos de las columnas que tienen valores NA
+
+```{r}
+nba <- nba[!is.na(nba$ts),]
+nba <- nba[!is.na(nba$threepar),]
+nba <- nba[!is.na(nba$ftr),]
+nba <- nba[!is.na(nba$tov),]
+```
+
+#### Creamos las variables country y team como factor para poder sumarlas a la regresion
+
+```{r}
+nba <- mutate(nba, country = as.numeric(factor(nba$nba_country))) #paises
+nba <- mutate(nba, team = as.numeric(factor(nba$tm))) #teams
+```
+
 
 ### Regresion lineal de las variables para explicar el salario de los jugadores
 ```{r}
-regres01 = lm(salary~nba_draftnumber + age + g + mp + per + ts + threepar + ftr + orb + drb + trb  + ast + stl + blk + tov + usg + ows + dws + ws + ws_48 + obpm + dbpm + bpm + vorp,data = nba)
+#Calculo el salario con logaritmo neperiano en la regresion porque existe un rango de valores muy amplio.
+regres01 = lm(log(salary, base = 10) ~ nba_draftnumber + age + g + mp + per + ts + threepar + ftr + orb + drb + trb  + ast + stl + blk + tov + usg + ows + dws + ws + ws_48 + obpm + dbpm + bpm + vorp + country + team,data = nba)
 gvmodel <- gvlma(regres01) 
 summary(gvmodel)
 
@@ -131,12 +149,12 @@ summary(gvmodel)
 Para esto utilizaremos la funcion anova para comparar dos modelos donde el primero contiene al segundo.
 
 ```{r}
-mod <- lm(salary ~ nba_country + tm + age + g + mp, data = nba)
-mod1 <- lm(salary ~ nba_country + tm, data = nba)
+mod <- lm(log(salary, base = 10) ~ nba_draftnumber + age + g + mp + per + ts + threepar + ftr + orb + drb + trb  + ast + stl + blk + tov + usg + ows + dws + ws + ws_48 + obpm + dbpm + bpm + vorp + country + team,data = nba)
+mod1 <- lm(log(salary, base = 10) ~ nba_draftnumber + age + g + mp + per + ts + threepar + ftr + orb + drb + trb  + ast + stl + blk + tov + usg + ows + dws + ws + ws_48 + obpm + dbpm + bpm + vorp,data = nba)
 
 anova(mod1, mod)
 
-# vemos que las variables cualitativas country y team no son significativas para estimar el salario de los jugadores ya que al ser el valor de p muy pequeno podemos decir que se puede descartar el modelo que contenga country y tm 
+# vemos que las variables country y team son significativas para estimar el salario de los jugadores ya que al ser el valor de p alto podemos decir que no se pueden descartar el modelo que contenga estas variables
 ```
 
 ### Ahora analizaremos los supuestos que no se cumplen para el modelo de regresion multilineal simple
@@ -175,7 +193,7 @@ residplot(regres01)
 
 Se grafican los valores ajustados con respecto a los predictores, si no hay problemas de linealidad se obtiene un recta sobre las que se representan los puntos.
 
-```{r}
+```{r linealidad, warning = FALSE}
 crPlots(regres01)
 ```
 
@@ -191,7 +209,7 @@ Es la existencia de alta correlación entre los predictores puede producir probl
 vif(regres01)
 sqrt(vif(regres01)) > 2
 
-# tenemos problemas de multicolinealidad en ts, trb, usg, obpm, threepar, ows, dbpm, g, dws, bpm, mp, orb, blk, ws, vorp, per, drb y ws_48
+# tenemos problemas de multicolinealidad en ts, trb, usg, obpm, threepar, ows, dbpm, g, dws, bpm, mp, orb, blk, ws, vorp, per, drb, ws_48
 ```
 
 
@@ -247,9 +265,9 @@ influencePlot(regres01, id.method="identify", main="Influence Plot",
               sub="Circle size is proportial to Cook's Distance" )
 ```
 
-#### Vamos a hacer una transformacion logaritmica para ajustar el modelo
+#### Vamos a verificar si merece la pena hacer una transformacion de las variables para ajustar el modelo
 
-La transformacion Box-Cox transformara las variables explicativas con un logaritmo neperiano
+La funcion powerTransform nos indica si merece la pena hacer una transformacion polinomial en la variable explicativa para ajustar el modelo.
 
 ```{r}
 
@@ -271,6 +289,50 @@ summary(powerTransform(nba$g))
 library(MASS)
 stepAIC(regres01, direction = "both")
 ```
+
+
+#### Hacemos un summary al modelo con el menor AIC para ver su R2
+
+
+```{r}
+summary(lm(formula = log(salary, base = 10) ~ nba_draftnumber + age + 
+    mp + per + ts + trb + ast + tov + usg + dws + ws_48 + obpm + 
+    bpm, data = nba))
+```
+
+
+#### Cross-Validation
+
+In cross-validation, a portion of the data is selected as the training sample, and a portion is selected as the hold-out sample. A regression equation is developed on the training sample and then applied to the hold-out sample. Because the hold-out sam- ple wasn’t involved in the selection of the model parameters, the performance on this sample is a more accurate estimate of the operating characteristics of the model with new data.
+
+In k-fold cross-validation, the sample is divided into k subsamples. Each of the k sub- samples serves as a hold-out group, and the combined observations from the remaining k – 1 subsamples serve as the training group. The performance for the k prediction equations applied to the k hold-out samples is recorded and then averaged. (When k equals n, the total number of observations, this approach is called jackknifing.)
+
+You can perform k-fold cross-validation using the crossval() function in the bootstrap package. The following listing provides a function (called shrinkage()) for cross-validating a model’s R-square statistic using k-fold cross-validation.
+
+```{r}
+
+library(bootstrap)
+shrinkage <- function(fit, k=10){ require(bootstrap)
+theta.fit <- function(x,y){lsfit(x,y)}
+theta.predict <- function(fit,x){cbind(1,x)%*%fit$coef}
+x <- fit$model[,2:ncol(fit$model)]
+y <- fit$model[,1]
+results <- crossval(x, y, theta.fit, theta.predict, ngroup=k)
+r2 <- cor(y, fit$fitted.values)^2
+r2cv <- cor(y, results$cv.fit)^2
+cat("Original R-square =", r2, "\n")
+cat(k, "Fold Cross-Validated R-square =", r2cv, "\n")
+cat("Change =", r2-r2cv, "\n")
+}
+states <- as.data.frame(nba)
+fit <- lm(formula = log(salary, base = 10) ~ nba_draftnumber + age + 
+    mp + per + ts + trb + ast + tov + usg + dws + ws_48 + obpm + 
+    bpm, data=states)
+shrinkage(fit)
+
+```
+You can see that the R-square based on the sample (0.5534) is overly optimistic. A better estimate of the amount of variance in salary that this model will account for with new data is the cross-validated R-square (0.5019). (Note that observations are assigned to the k groups randomly, so you’ll get a slightly different result each time you execute the shrinkage() function.)
+
 
 #### Relative importance of each variable 
 
@@ -305,8 +367,9 @@ dotchart(import$Weights, labels=row.names(import),
 return(import)
 }
 
-fit <- lm(salary ~ nba_draftnumber + age + g + mp + per + 
-    threepar + orb + trb + usg + ws + obpm, data=nba)
+fit <- lm(formula = log(salary, base = 10) ~ nba_draftnumber + age + 
+    mp + per + ts + trb + ast + tov + usg + dws + ws_48 + obpm + 
+    bpm, data = nba)
 relweights(fit, col="blue")
 ```
 

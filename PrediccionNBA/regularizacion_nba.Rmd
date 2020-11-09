@@ -1,0 +1,497 @@
+---
+title: "regularizacion_nba"
+author: "Hugo César Octavio del Sueldo"
+date: "11/9/2020"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+    math: katex
+---
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r data, include = FALSE}
+library(readr)
+library(glmnet)   # implementing regularized regression approaches
+library(dplyr)    # basic data manipulation procedures
+library(ggplot2)  # plotting
+library(knitr)
+library(gvlma)
+library(MASS)
+library(car)
+library(bootstrap)
+library(prettydoc)
+library(here) # Comentar
+library(tidyverse)
+library(janitor) # Clean names
+library(skimr) # Beautiful Summarize
+library(magrittr) # Pipe operators
+library(corrplot) # Correlations
+library(ggcorrplot)  # Correlations
+library(PerformanceAnalytics) # Correlations
+library(leaps) # Model selection
+library(boot)
+library(plotmo)
+library(rsample)  # data splitting
+nba <- read_csv("nba.csv")
+```
+## Prediccion en el Data Set NBA
+El data set `nba` muestra informacion sobre los salarios y los rendimientos de los jugadores de la NBA
+
+### Exploratory data analysis of the data set
+
+- Player: Nombre del jugador.
+
+- Salary: Salario en dolares.
+
+- NBA_Country: NAcionalidad del jugador.
+
+- NBA_DraftNumber: Posición del draft.
+
+- Age: Edad del jugador.
+
+- Tm: Abreviatura del nombre.
+
+- G: Partidos jugados
+
+- MP: Minutos jugados.
+
+- PER: Índice de eficiencia del jugador. El promedio de la liga es 15.
+
+- TS = Porcentaje de tiro real. Tiene en cuenta los tiros de 2 puntos, los triples y los tiros libres.
+                                        
+- TMP: Minutos jugados por el equipo.
+                                        
+- 3PAr: Porcentaje de triples.
+                                        
+- FTr: Porcentaje de tiros libres.
+                                        
+- ORB%Offensive Rebound Percentage (ORB%): Porcentaje de rebotes ofensivos.
+
+- DRB%: Porcentaje de rebote defensivo.
+
+- TRB%: Porcentaje de rebote total.
+
+- AST%: Porcentaje de asistencia.
+
+- STL%: Porcentaje de robo.
+
+- BLK%: Porcentaje de tapones.
+
+- TOV%: Porcentaje de robo de balón antes de que el equipo contrario tire.
+
+- USG%: Porcentaje de jugadas que estuvo involucrado un jugador, siempre que la jugada termine en uno de los tres resultados reales: intento de gol de campo, intento de tiro libre o pérdida.
+
+- OWS: Acciones de victoria ofensivas.
+
+- DWS: Acciones de victorias defensivas.
+
+- WS: Un número estimado de victorias a las que un jugador ha contribuido.
+
+- WS/48: WS por 48 minutos.
+
+- BPM: Calcula el más/menos de un jugador respecto al rendimiento del equipo por cada 100 posesiones ofensivas.
+
+- DBPM: Calcula el más/menos de un jugador respecto al rendimiento del equipo por cada 100 posesiones defensivas.
+
+- BPM: Calcula el más/menos de un jugador respecto al rendimiento del equipo por cada 100 posesiones.
+
+- VORP: Valor sobre jugador de reemplazo.
+
+#### Cambio los nombres de algunas columnas
+
+Algunas columnas tienen nombres con los simbolos del %, comienzan con numeros o / que nos afectan a la hora de hacer calculos. Por lo tanto, vamos a modificarlas para poder trabajar correctamente.
+```{r}
+nba %<>% clean_names()
+colnames(nba)
+```
+
+### Summarize data
+
+```{r}
+skim(nba)
+```
+
+Hay dos datos repetidos y varios NA
+
+### Data wrangling
+Data wrangling is the process of cleaning and unifying complex data sets for analysis, in turn boosting productivity within an organization.
+
+```{r}
+# delete duplicate
+# Remove duplicate rows of the dataframe
+nba %<>% distinct(player,.keep_all= TRUE)
+
+# delete NA's
+nba %<>% drop_na()
+
+# Summarise
+skim(nba)
+```
+
+#### Ahora que tenemos limpio el data set vamos a utilizar Cross-Validation con los metodos Ridge, Lasso y Elastic Net para tomar el mejor modelo y luego haremos prediccion
+
+### Leave-One-Out Cross-Validation
+
+#### Antes de comenzar con los metodos de regularizacion, probamos el cv error con el modelo estimado por lm
+
+```{r}
+#library(glmnet)
+#library (boot)
+#library(skimr)
+log_data <- nba %>% mutate(salary=log(salary))
+
+vars <- c("player","nba_country","tm")
+
+nba_sincategoricas <- log_data %>% select_at(vars(-vars))
+
+set.seed(123)
+mod1_fit1 = glm(salary ~ .,data = nba_sincategoricas,family = gaussian())
+coef(mod1_fit1)
+```
+
+```{r}
+cv.err =cv.glm(nba_sincategoricas, mod1_fit1)
+#delta  
+# A vector of length two. The first component is the raw cross-validation estimate of prediction error. The second component is the adjusted cross-validation estimate. The adjustment is designed to compensate for the bias introduced by not using leave-one-out cross-validation.
+cv.err$delta
+```
+
+
+## K-Fold Cross-Validation
+Supone dividir la muestra en k grupos o folds, de aproximadamente igual tamaño. Cada folds es tratado como un conjunto de validación, de tal forma que se estima el modelo con los datos que no están el fold (los otros k−1 folds) y se predicen en el fold.
+
+
+```{r}
+#k folds cross validation con todas las variables explicativas menos las categoricas
+set.seed(123)
+cv.err = cv.glm(nba_sincategoricas, mod1_fit1, K = 10)
+cv.err$delta
+```
+
+
+## REGULARIZACION Y METODOS DE CONTRACCION
+
+### Ridge
+
+```{r}
+#library(rsample)  # data splitting 
+#library(glmnet)   # implementing regularized regression approaches
+#library(dplyr)    # basic data manipulation procedures
+#library(ggplot2)  # plotting
+```
+
+```{r}
+# Create training (70%) and test (30%) sets for nba data set.
+# Use set.seed for reproducibility
+
+set.seed(05112020)
+nba_split <- initial_split(nba_sincategoricas, prop = .7, strata = "salary")
+nba_train <- training(nba_split)
+nba_test  <- testing(nba_split)
+```
+
+```{r}
+# Create training and testing feature model matrices and response vectors.
+# we use model.matrix(...)[, -1] to discard the intercept
+nba_train_x <- model.matrix(salary ~ ., nba_train)[, -1]
+nba_train_y <- nba_train$salary
+
+nba_test_x <- model.matrix(salary ~ ., nba_test)[, -1]
+nba_test_y <- nba_test$salary
+
+# What is the dimension of of your feature matrix?
+dim(nba_train_x)
+```
+
+```{r}
+# Apply Ridge regression to nba data
+nba_ridge <- glmnet(
+  x = nba_train_x,
+  y = nba_train_y,
+  alpha = 0
+)
+
+plot(nba_ridge, xvar = "lambda")
+```
+
+```{r}
+# lambdas applied to penalty parameter
+nba_ridge$lambda %>% head()
+```
+
+
+### Tuning λ
+
+```{r}
+# Apply CV Ridge regression to nba data
+nba_ridge_cv <- cv.glmnet(
+  x = nba_train_x,
+  y = nba_train_y,
+  alpha = 0
+)
+
+# plot results
+plot(nba_ridge_cv)
+```
+
+```{r}
+min(nba_ridge_cv$cvm) # minimum MSE
+```
+
+
+```{r}
+nba_ridge_cv$lambda.min     # lambda for this min MSE
+```
+
+
+```{r}
+log(nba_ridge_cv$lambda.min) #calculo el logaritmo para verlo visual en el grafico
+```
+
+```{r}
+nba_ridge_cv$cvm[nba_ridge_cv$lambda == nba_ridge_cv$lambda.1se]  # 1 st.error of min MSE
+```
+
+```{r}
+nba_ridge_cv$lambda.1se  # lambda for this MSE
+```
+
+```{r}
+log(nba_ridge_cv$lambda.1se)
+```
+
+```{r}
+plot(nba_ridge, xvar = "lambda")
+abline(v = log(nba_ridge_cv$lambda.1se), col = "red", lty = "dashed")
+```
+
+##### Ventajas y Desventajas
+
+```{r}
+coef(nba_ridge_cv, s = "lambda.1se") %>%
+  broom::tidy() %>%
+  filter(row != "(Intercept)") %>%
+  top_n(25, wt = abs(value)) %>%
+  ggplot(aes(value, reorder(row, value))) +
+  geom_point() +
+  ggtitle("Top 25 influential variables") +
+  xlab("Coefficient") +
+  ylab(NULL)
+```
+Observamos aqui la gran desventaja de los modelos ridge que es que no eliminan variables explicativas del modelo.
+
+### Lasso
+
+```{r}
+## Apply lasso regression to ames data: alpha=1
+nba_lasso <- glmnet(
+  x = nba_train_x,
+  y = nba_train_y,
+  alpha = 1
+)
+
+plot(nba_lasso, xvar = "lambda")
+```
+
+### Tuning - CV
+
+```{r}
+# Apply CV Ridge regression to ames data
+nba_lasso_cv <- cv.glmnet(
+  x = nba_train_x,
+  y = nba_train_y,
+  alpha = 1
+)
+# plot results
+plot(nba_lasso_cv)
+```
+
+```{r}
+min(nba_lasso_cv$cvm)   # minimum MSE
+```
+
+```{r}
+nba_lasso_cv$lambda.min     # lambda for this min MSE
+```
+
+```{r}
+log(nba_lasso_cv$lambda.min)  #calculo el logaritmo para verlo en el grafico
+```
+
+```{r}
+nba_lasso_cv$cvm[nba_lasso_cv$lambda == nba_lasso_cv$lambda.1se]  # 1 st.error of min MSE
+```
+
+```{r}
+nba_lasso_cv$lambda.1se  # lambda for this MSE
+```
+
+```{r}
+log(nba_lasso_cv$lambda.1se) #calculo el logaritmo del lambda
+```
+
+
+```{r}
+plot(nba_lasso, xvar = "lambda")
+abline(v = log(nba_lasso_cv$lambda.min), col = "red", lty = "dashed")
+abline(v = log(nba_lasso_cv$lambda.1se), col = "red", lty = "dashed")
+```
+### Ventajas y Desventajas
+
+```{r}
+coef(nba_lasso_cv, s = "lambda.1se") %>%
+  tidy() %>%
+  filter(row != "(Intercept)") %>%
+  ggplot(aes(value, reorder(row, value), color = value > 0)) +
+  geom_point(show.legend = FALSE) +
+  ggtitle("Influential variables") +
+  xlab("Coefficient") +
+  ylab(NULL)
+```
+
+```{r}
+# minimum Ridge MSE
+min(nba_ridge_cv$cvm)
+```
+
+
+```{r}
+# minimum Lasso MSE
+min(nba_lasso_cv$cvm)
+```
+
+## Elastic Net (Red elástica)
+
+La red elástica es otra penalización que incorpora la selección variable del lazo y la contracción de predictores correlacionados como la regresión de ridge.
+
+```{r}
+lasso    <- glmnet(nba_train_x, nba_train_y, alpha = 1.0) 
+elastic1 <- glmnet(nba_train_x, nba_train_y, alpha = 0.25) 
+elastic2 <- glmnet(nba_train_x, nba_train_y, alpha = 0.75) 
+ridge    <- glmnet(nba_train_x, nba_train_y, alpha = 0.0)
+
+par(mfrow = c(2, 2), mar = c(6, 4, 6, 2) + 0.1)
+plot(lasso, xvar = "lambda", main = "Lasso (Alpha = 1)\n\n\n")
+plot(elastic1, xvar = "lambda", main = "Elastic Net (Alpha = .25)\n\n\n")
+plot(elastic2, xvar = "lambda", main = "Elastic Net (Alpha = .75)\n\n\n")
+plot(ridge, xvar = "lambda", main = "Ridge (Alpha = 0)\n\n\n")
+```
+
+### Tuning
+Elastic nets: λ y α
+
+```{r}
+# maintain the same folds across all models
+fold_id <- sample(1:10, size = length(nba_train_y), replace=TRUE)
+
+# search across a range of alphas
+tuning_grid <- tibble::tibble(
+  alpha      = seq(0, 1, by = .1),
+  mse_min    = NA,
+  mse_1se    = NA,
+  lambda_min = NA,
+  lambda_1se = NA
+)
+tuning_grid
+```
+
+
+```{r}
+for(i in seq_along(tuning_grid$alpha)) {
+  
+  # fit CV model for each alpha value
+  fit <- cv.glmnet(nba_train_x, nba_train_y, alpha = tuning_grid$alpha[i], foldid = fold_id)
+  
+  # extract MSE and lambda values
+  tuning_grid$mse_min[i]    <- fit$cvm[fit$lambda == fit$lambda.min]
+  tuning_grid$mse_1se[i]    <- fit$cvm[fit$lambda == fit$lambda.1se]
+  tuning_grid$lambda_min[i] <- fit$lambda.min
+  tuning_grid$lambda_1se[i] <- fit$lambda.1se
+}
+
+tuning_grid
+```
+
+```{r}
+tuning_grid %>%
+  mutate(se = mse_1se - mse_min) %>%
+  ggplot(aes(alpha, mse_min)) +
+  geom_line(size = 2) +
+  geom_ribbon(aes(ymax = mse_min + se, ymin = mse_min - se), alpha = .25) +
+  ggtitle("MSE ± one standard error")
+```
+Influential variables in the elastic net model
+
+```{r}
+coef(fit, s = "lambda.1se") %>%
+  tidy() %>%
+  filter(row != "(Intercept)") %>%
+  ggplot(aes(value, reorder(row, value), color = value > 0)) +
+  geom_point(show.legend = FALSE) +
+  ggtitle("Influential variables") +
+  xlab("Coefficient") +
+  ylab(NULL)
+```
+
+
+Use the plotres() function to plot model diagnostics for glmnet models
+
+```{r}
+# install.packages("plotmo")
+#library(plotmo)
+plotres(nba_ridge)
+plotres(nba_lasso)
+plotres(fit)
+# The first plot shows the estimated slope for each parameter for # different values of (log) lambda. Notice the different shape
+# between ridge and LASSO.
+```
+
+
+
+## Predicción
+Vamos a comparar la prediccion de cada uno de los metodos y utilizaremos el que tiene menor mse.test.mean
+
+```{r}
+# some best model
+cv_ridge   <- cv.glmnet(nba_train_x, nba_train_y, alpha = 0.0)
+min(cv_ridge$cvm)
+```
+
+```{r}
+# predict
+pred <- predict(cv_ridge, s = cv_ridge$lambda.min, nba_test_x)
+mean((nba_test_y - pred)^2)   # prediccion con ridge
+```
+
+
+```{r}
+# some best model
+cv_lasso   <- cv.glmnet(nba_train_x, nba_train_y, alpha = 1.0)
+min(cv_lasso$cvm)
+```
+
+```{r}
+# predict
+pred <- predict(cv_lasso, s = cv_lasso$lambda.min, nba_test_x)
+mean((nba_test_y - pred)^2)   # prediccion con lasso
+```
+
+```{r}
+# some best model
+cv_net   <- cv.glmnet(nba_train_x, nba_train_y, alpha = 0.2)
+min(cv_net$cvm)     
+```
+
+```{r}
+# predict
+pred <- predict(cv_net, s = cv_net$lambda.min, nba_test_x)
+mean((nba_test_y - pred)^2)    #prediccion con elastic net
+```
+
+Vamos a elegir el modelo lasso ya que es el modelo mas simple junto con el modelo elastic net pero tiene menor mse.test.mean que elastic net. El modelo ridge lo rechazo porq no elimina variables explicativas del modelo y ademas tiene un promedio de error mayor.
